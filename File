@@ -1,0 +1,260 @@
+import java.util.*;
+import java.util.stream.*;
+
+class FileSystemManager {
+    int totalBlocks;
+    Map<String, File> directory;
+    List<Integer> freeList;
+    int fragmentation;
+    FileBlock[] blocks;
+    int wastedBlocks;
+
+   public FileSystemManager(int totalBlocks) {
+        // initialize the blocks array
+        this.blocks = new FileBlock[totalBlocks];
+        for (int i = 0; i < totalBlocks; i++) {
+            this.blocks[i] = new FileBlock(i, false, -1);
+        }
+        // rest of the constructor code
+        this.totalBlocks = totalBlocks;
+        this.directory = new HashMap<>();
+        this.freeList = IntStream.range(0, totalBlocks).boxed().collect(Collectors.toList());
+        this.fragmentation = 0;
+        this.wastedBlocks = 0;
+    }
+
+public boolean allocateFile(File file) {
+    if (freeList.size() < file.size) {
+        System.out.println("Not enough disk space to allocate file: " + file.name);
+        return false;
+    }
+
+    // shuffle the free list to allocate blocks randomly
+    Collections.shuffle(freeList);
+
+    List<Integer> blocks = new ArrayList<>();
+    for (int i = 0; i < file.size; i++) {
+        int blockIndex = freeList.get(i);
+        blocks.add(blockIndex);
+
+        // link previous block to current block
+        if (i > 0) {
+            int prevBlockIndex = blocks.get(i - 1);
+            getBlock(prevBlockIndex).nextBlock = blockIndex;
+        }
+
+        // update fragmentation
+        if (isFragmented(blockIndex)) {
+            fragmentation++;
+        }
+    }
+
+    // create the file object and add it to the directory
+    File newFile = new File(file.name, file.size, this);
+    newFile.nextBlock = blocks.get(0);
+    directory.put(file.name, newFile);
+
+    // set the blocks as allocated
+    for (int blockIndex : blocks) {
+        FileBlock block = getBlock(blockIndex);
+        block.allocated = true;
+        freeList.remove(Integer.valueOf(blockIndex));
+    }
+
+    return true;
+}
+
+
+
+
+
+  public boolean deleteFile(String fileName) {
+    if (directory.containsKey(fileName)) {
+        File file = directory.get(fileName);
+        int currentBlock = file.nextBlock;
+        while (currentBlock != -1) {
+            // free the block and update fragmentation
+            FileBlock block = getBlock(currentBlock);
+            if (isFragmented(currentBlock)) {
+                fragmentation--;
+            }
+            block.allocated = false;
+            freeList.add(currentBlock);
+
+            currentBlock = block.nextBlock;
+        }
+        directory.remove(fileName);
+        return true;
+    } else {
+        System.out.println("File not found: " + fileName);
+        return false;
+    }
+}
+
+private boolean isFragmented(int blockIndex) {
+    FileBlock block = getBlock(blockIndex);
+    return (
+        !block.allocated &&
+        ((blockIndex > 0 && getBlock(blockIndex - 1).allocated) || 
+         (blockIndex < totalBlocks - 1 && getBlock(blockIndex + 1).allocated)) &&
+        ((blockIndex > 0 && !getBlock(blockIndex - 1).allocated) || 
+         (blockIndex < totalBlocks - 1 && !getBlock(blockIndex + 1).allocated))
+    );
+}
+
+
+
+
+    public boolean renameFile(String oldName, String newName) {
+    if (directory.containsKey(oldName)) {
+        File file = directory.remove(oldName);
+        directory.put(newName, file);
+        file.name = newName;
+        return true;
+    } else {
+        System.out.println("File not found: " + oldName);
+        return false;
+    }
+}
+
+public boolean moveFile(String fileName, String newLocation) {
+    if (directory.containsKey(fileName)) {
+        File file = directory.get(fileName);
+        List<Integer> blocks = new ArrayList<>();
+        int currentBlock = file.nextBlock;
+        while (currentBlock != -1) {
+            blocks.add(currentBlock);
+            currentBlock = getBlock(currentBlock).nextBlock;
+        }
+        if (blocks.size() <= freeList.size() + getWastedBlocks()) {
+            // delete the file from old location
+            deleteFile(fileName);
+
+            // allocate blocks at new location
+            File newFile = new File(fileName, blocks.size(), this);
+            boolean success = allocateFile(newFile);
+            if (success) {
+                // update block pointers
+                currentBlock = newFile.nextBlock;
+                for (int i = 0; i < blocks.size(); i++) {
+                    int blockIndex = blocks.get(i);
+                    getBlock(currentBlock).nextBlock = blockIndex;
+                    currentBlock = blockIndex;
+                }
+                
+                // update fragmentation
+                for (int blockIndex : blocks) {
+                    if (isFragmented(blockIndex)) {
+                        fragmentation++;
+                    }
+                }
+                
+                return true;
+            } else {
+                System.out.println("Not enough disk space to move file: " + fileName);
+                return false;
+            }
+        } else {
+            System.out.println("Not enough disk space to move file: " + fileName);
+            return false;
+        }
+    } else {
+        System.out.println("File not found: " + fileName);
+        return false;
+    }
+}
+
+
+   public FileBlock getBlock(int blockIndex) {
+        return blocks[blockIndex];
+    }
+
+
+
+    public int getWastedBlocks() {
+        int wastedBlocks = 0;
+        int currentBlock = 0;
+        while (currentBlock < totalBlocks) {
+            if (!getBlock(currentBlock).allocated) {
+                wastedBlocks += 1;
+            }
+            currentBlock += 1;
+        }
+        return wastedBlocks;
+    }
+}
+    
+
+class FileBlock {
+    int index;
+    boolean allocated;
+    int nextBlock;
+
+    public FileBlock(int index, boolean allocated, int nextBlock) {
+        this.index = index;
+        this.allocated = allocated;
+        this.nextBlock = nextBlock;
+    }
+    
+}
+
+class File {
+    String name;
+    int size;
+    int nextBlock;
+    FileSystemManager fs;
+
+    public File(String name, int size, FileSystemManager fs) {
+        this.name = name;
+        this.size = size;
+        this.nextBlock = -1;
+        this.fs = fs;
+    }
+    
+
+
+public static void main(String[] args) {
+    Scanner scanner = new Scanner(System.in);
+    System.out.println("Enter the Size of disk:");
+    int a=scanner.nextInt();
+    System.out.println("Enter the number of files:");
+    int numFiles = scanner.nextInt();
+    scanner.nextLine();
+
+    FileSystemManager fs = new FileSystemManager(a);
+
+    for (int i = 0; i < numFiles; i++) {
+        System.out.println("Enter the name and size of file " + (i+1) + " separated by a space:");
+        String[] input = scanner.nextLine().split(" ");
+        String fileName = input[0];
+        int fileSize = Integer.parseInt(input[1]);
+        File file = new File(fileName, fileSize, fs); // pass in fs as an argument
+        boolean success = fs.allocateFile(file);
+        System.out.println("File allocation result: " + success);
+    }
+
+    // print directory
+    System.out.println("Directory contents:");
+    for (Map.Entry<String, File> entry : fs.directory.entrySet()) {
+        String fileName = entry.getKey();
+        File file = entry.getValue();
+        System.out.println("FileName="+ fileName + ": size=" + file.size + ", blocks=" + file.getFileBlocks(file)); 
+        // call the method on the File instance
+    
+    }
+
+    // print fragmentation and wasted blocks
+    System.out.println("Fragmentation: " + fs.fragmentation);
+    System.out.println("Wasted blocks: " + fs.getWastedBlocks());
+}
+
+    private static String getFileBlocks(File file) {
+        StringBuilder sb = new StringBuilder();
+        int currentBlock = file.nextBlock;
+        while (currentBlock != -1) {
+            sb.append(currentBlock).append(" ");
+            currentBlock = file.fs.getBlock(currentBlock).nextBlock;
+        }
+        return sb.toString();
+    }
+}
